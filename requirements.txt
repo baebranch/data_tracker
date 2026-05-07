@@ -1,3 +1,4 @@
 flet[all]
 flet_charts
+pyinstaller
 desktop-notifier

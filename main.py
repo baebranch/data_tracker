@@ -1,10 +1,12 @@
 import os
+import sys
 import json
 import psutil
 import asyncio
 import logging
-import datetime
 import pathlib
+import datetime
+import winsound
 import flet as ft
 import flet_charts as fch
 from desktop_notifier import DesktopNotifier, Icon
@@ -12,9 +14,18 @@ from desktop_notifier import DesktopNotifier, Icon
 
 logger = logging.getLogger("data_trakr")
 OPACITY = 0.2
+DEFAULT = 100
 DATA_DIR = "data"
 APP_NAME = "Data Tracker"
 DATA_FILE = os.path.join(DATA_DIR, "network_data.json")
+
+if getattr(sys, 'frozen', False):
+  # Running in a PyInstaller bundle (exe)
+  base_path = sys._MEIPASS
+else:
+  # Running as a script
+  base_path = os.path.dirname(__file__)
+PATH = pathlib.Path(os.path.join(base_path, "assets", "favicon.ico"))
 
 
 class Tracker:
@@ -29,7 +40,7 @@ class Tracker:
     # Start notification handler
     self._notifier = DesktopNotifier(
       app_name=APP_NAME,
-      app_icon=Icon(path=pathlib.Path("./favicon.ico").resolve()),
+      app_icon=Icon(path=PATH)
     )
 
   def get_midnight_timestamp(self):
@@ -75,10 +86,11 @@ class Tracker:
     except Exception as e:
       logger.error(f"Error saving data: {e}")
   
-  def setup(self, set_sent, set_recv, set_total, set_hourly) -> None:
+  def setup(self, set_sent, set_recv, total, set_total, set_hourly) -> None:
     """ Setup the state variables """
     self.set_sent = set_sent
     self.set_recv = set_recv
+    self.total = total
     self.set_total = set_total
     self.set_hourly = set_hourly
     self.ready = True
@@ -88,7 +100,7 @@ class Tracker:
     self.threshold = threshold
     # Recalculate last_notified_mb based on current total
     if hasattr(self, 'set_total'):
-      current_total = self.set_total() if callable(self.set_total) else 0
+      current_total = self.total
       current_mb = current_total / (1024 * 1024)
       self.last_notified_mb = (current_mb // self.threshold) * self.threshold if self.threshold > 0 else 0
 
@@ -155,6 +167,7 @@ class Tracker:
       if self.threshold > 0 and current_mb >= self.last_notified_mb + self.threshold:
         self.last_notified_mb += self.threshold
         await self._notifier.send("Data Usage Alert", f"Total data used: {current_mb:.2f} MB")
+        winsound.MessageBeep()
       
       self.save_data(total_sent, total_recv, last_sent, last_recv, hourly, self.threshold)
 
@@ -164,7 +177,7 @@ def hourly_chart(hourly: list[float]) -> fch.BarChart:
   """ Build a 24-bar chart showing hourly network usage in MB """
   max_y = 100
   current_hour = datetime.datetime.now().hour
-  max_mb = max((v / (1024 * 1024) for v in hourly), default=0)
+  max_mb = max(*[v / (1024 * 1024) for v in hourly], 1)
 
   groups = [
     fch.BarChartGroup(
@@ -206,7 +219,7 @@ def AppView(page: ft.Page, trak: Tracker) -> list[ft.Control]:
     await e.page.window.close()
 
   # Setup the tracker for start
-  trak.setup(set_sent, set_recv, set_total, set_hourly)
+  trak.setup(set_sent, set_recv, total, set_total, set_hourly)
 
   # Opacity update event handlers
   def mouse_enter(e):
@@ -220,13 +233,15 @@ def AppView(page: ft.Page, trak: Tracker) -> list[ft.Control]:
   # Threshold change handler
   def on_change(e):
     try:
+      if e.control.value == '': return
+
       new_threshold = float(e.control.value)
-      set_threshold(new_threshold)
+      set_threshold(e.control.value)
       trak.set_threshold(new_threshold)
     except ValueError:
       pass  # Ignore invalid input
 
-  hint = "Notification threshold (MB)"
+  hint = "Value (MB)"
 
   return [
     ft.GestureDetector(
@@ -262,7 +277,7 @@ def AppView(page: ft.Page, trak: Tracker) -> list[ft.Control]:
                         width=12,
                         height=12,
                         color=ft.Colors.WHITE,
-                        src="./assets/close.svg"
+                        src="./close.svg"
                       ),
                       on_click=close_window,
                       style=ft.ButtonStyle(
