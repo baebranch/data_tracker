@@ -39,7 +39,7 @@ A lightweight desktop widget built with [Flet](https://flet.dev/) that displays 
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/yourusername/data-tracker.git
+   git clone https://github.com/baebranch/data_tracker.git
    cd data-tracker
    ```
 
