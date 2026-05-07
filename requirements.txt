@@ -1,2 +1,3 @@
 flet[all]
-flet_chats
+flet_charts
+desktop-notifier

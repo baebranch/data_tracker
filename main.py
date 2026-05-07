@@ -4,12 +4,16 @@ import psutil
 import asyncio
 import logging
 import datetime
+import pathlib
 import flet as ft
 import flet_charts as fch
+from desktop_notifier import DesktopNotifier, Icon
 
 
 logger = logging.getLogger("data_trakr")
+OPACITY = 0.2
 DATA_DIR = "data"
+APP_NAME = "Data Tracker"
 DATA_FILE = os.path.join(DATA_DIR, "network_data.json")
 
 
@@ -18,7 +22,15 @@ class Tracker:
   ready = False # Indicates if Tracker is ready
 
   def __init__(self):
-    self.start_sent, self.start_recv, self.hourly_data = self.load_data()
+    # Initialize data tracking variables
+    self.start_sent, self.start_recv, self.hourly_data, self.threshold = self.load_data()
+    self.last_notified_mb = 0
+
+    # Start notification handler
+    self._notifier = DesktopNotifier(
+      app_name=APP_NAME,
+      app_icon=Icon(path=pathlib.Path("./favicon.ico").resolve()),
+    )
 
   def get_midnight_timestamp(self):
     """ Return the datetime object for today's midnight """
@@ -35,13 +47,13 @@ class Tracker:
         with open(DATA_FILE, "r") as f:
           data = json.load(f)
           if data.get("date") == today_str:
-            return data.get("sent", 0), data.get("recv", 0), data.get("hourly", [0.0] * 24)
+            return data.get("sent", 0), data.get("recv", 0), data.get("hourly", [0.0] * 24), data.get("threshold", 50.0)
       except Exception as e:
         logger.error(f"Error loading data: {e}")
 
-    return 0, 0, [0.0] * 24
+    return 0, 0, [0.0] * 24, 50.0
 
-  def save_data(self, sent, recv, last_sent, last_recv, hourly):
+  def save_data(self, sent, recv, last_sent, last_recv, hourly, threshold):
     """Save accumulated data to JSON."""
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -55,7 +67,8 @@ class Tracker:
             "recv": recv,
             "last_sent": last_sent,
             "last_recv": last_recv,
-            "hourly": hourly
+            "hourly": hourly,
+            "threshold": threshold
           },
           f
         )
@@ -70,6 +83,15 @@ class Tracker:
     self.set_hourly = set_hourly
     self.ready = True
 
+  def set_threshold(self, threshold: float):
+    """Set the notification threshold."""
+    self.threshold = threshold
+    # Recalculate last_notified_mb based on current total
+    if hasattr(self, 'set_total'):
+      current_total = self.set_total() if callable(self.set_total) else 0
+      current_mb = current_total / (1024 * 1024)
+      self.last_notified_mb = (current_mb // self.threshold) * self.threshold if self.threshold > 0 else 0
+
   # async def tracker(accumulated_sent, accumulated_recv, set_sent, set_total, set_recv) -> None:
   async def tracker(self) -> None:
     """ Tracks additional data sent """
@@ -82,6 +104,11 @@ class Tracker:
     hourly = list(self.hourly_data)
     
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    
+    # Initialize last_notified_mb
+    initial_total = total_sent + total_recv
+    initial_mb = initial_total / (1024 * 1024)
+    self.last_notified_mb = (initial_mb // self.threshold) * self.threshold if self.threshold > 0 else 0
 
     # Continuosly track data usage
     while True:
@@ -123,11 +150,17 @@ class Tracker:
       self.set_total(total_sent + total_recv)
       self.set_hourly(list(hourly))
       
-      self.save_data(total_sent, total_recv, last_sent, last_recv, hourly)
+      # Check for notifications
+      current_mb = (total_sent + total_recv) / (1024 * 1024)
+      if self.threshold > 0 and current_mb >= self.last_notified_mb + self.threshold:
+        self.last_notified_mb += self.threshold
+        await self._notifier.send("Data Usage Alert", f"Total data used: {current_mb:.2f} MB")
+      
+      self.save_data(total_sent, total_recv, last_sent, last_recv, hourly, self.threshold)
 
       await asyncio.sleep(10)  # update every 10 seconds
 
-def _build_hourly_chart(hourly: list[float]) -> fch.BarChart:
+def hourly_chart(hourly: list[float]) -> fch.BarChart:
   """ Build a 24-bar chart showing hourly network usage in MB """
   max_y = 100
   current_hour = datetime.datetime.now().hour
@@ -163,8 +196,14 @@ def AppView(page: ft.Page, trak: Tracker) -> list[ft.Control]:
   # Create tracker state variables
   sent, set_sent = ft.use_state(trak.start_sent)
   recv, set_recv = ft.use_state(trak.start_recv)
-  total, set_total = ft.use_state(trak.start_sent + trak.start_recv)
+  threshold, set_threshold = ft.use_state(trak.threshold)
   hourly, set_hourly = ft.use_state(list(trak.hourly_data))
+  total, set_total = ft.use_state(trak.start_sent + trak.start_recv)
+
+  # Close window on click
+  async def close_window(e):
+    """ Close window on click """
+    await e.page.window.close()
 
   # Setup the tracker for start
   trak.setup(set_sent, set_recv, set_total, set_hourly)
@@ -175,8 +214,19 @@ def AppView(page: ft.Page, trak: Tracker) -> list[ft.Control]:
     page.update()
   
   def mouse_exit(e):
-    page.window.opacity = 0.5
+    page.window.opacity = OPACITY
     page.update()
+
+  # Threshold change handler
+  def on_change(e):
+    try:
+      new_threshold = float(e.control.value)
+      set_threshold(new_threshold)
+      trak.set_threshold(new_threshold)
+    except ValueError:
+      pass  # Ignore invalid input
+
+  hint = "Notification threshold (MB)"
 
   return [
     ft.GestureDetector(
@@ -187,20 +237,51 @@ def AppView(page: ft.Page, trak: Tracker) -> list[ft.Control]:
               ft.Container(
                 ft.Row(
                   [
-                    ft.Text(
-                      size=18,
+                    ft.Container(
+                      ft.Row(
+                        [
+                          ft.Text(
+                            size=18,
+                            expand=True,
+                            value=APP_NAME,
+                            color=ft.Colors.BLUE,
+                            margin=ft.Margin.all(0),
+                            weight=ft.FontWeight.BOLD,
+                            text_align=ft.TextAlign.CENTER
+                          )
+                        ],
+                        expand=True,
+                      ),
                       expand=True,
-                      value="Data Tracker",
-                      # color=ft.Colors.BLUE,
-                      weight=ft.FontWeight.BOLD,
-                      text_align=ft.TextAlign.CENTER,
-                      margin=ft.Margin.all(0)
+                      margin=ft.Margin.only(left=40),
+                      padding=ft.Padding.symmetric(vertical=7, horizontal=0),
+                    ),
 
-                    )
+                    ft.FilledButton(
+                      content=ft.Image(
+                        width=12,
+                        height=12,
+                        color=ft.Colors.WHITE,
+                        src="./assets/close.svg"
+                      ),
+                      on_click=close_window,
+                      style=ft.ButtonStyle(
+                        bgcolor=ft.Colors.SURFACE,
+                        padding=ft.Padding.all(14),
+                        overlay_color=ft.Colors.RED,
+                        shadow_color=ft.Colors.TRANSPARENT,
+                        shape=ft.RoundedRectangleBorder(radius=0)
+                      ),
+                      width=40,
+                      height=40,
+                      tooltip="Close"
+                    ),
                   ],
+                  spacing=0,
                   expand=True,
+                  margin=ft.Margin.all(0)
                 ),
-                padding=ft.Padding.symmetric(vertical=10, horizontal=0),
+                expand=True,
                 border=ft.Border.only(bottom=ft.BorderSide(1,ft.Colors.GREY_800))
               ),
               
@@ -242,8 +323,48 @@ def AppView(page: ft.Page, trak: Tracker) -> list[ft.Control]:
               ft.Container(
                 height=100,
                 expand=True,
-                content=_build_hourly_chart(hourly),
+                content=hourly_chart(hourly),
                 padding=ft.Padding.symmetric(horizontal=4, vertical=10),
+                border=ft.Border.only(top=ft.BorderSide(1,ft.Colors.GREY_800)),
+              ),
+
+              # Settings
+              ft.Container(
+                ft.Row(
+                  [
+                    ft.Text("Notify every:"),
+                    ft.Container(content=
+                      ft.TextField(
+                        expand=True,
+                        hint_text=hint,
+                        border_radius=3,
+                        multiline=False, 
+                        on_change=on_change,
+                        value=str(threshold),
+                        align=ft.Alignment.CENTER,
+                        border=ft.InputBorder.NONE,
+                        bgcolor=ft.Colors.TRANSPARENT,
+                        border_color=ft.Colors.TRANSPARENT,
+                        clip_behavior=ft.ClipBehavior.HARD_EDGE, 
+                        content_padding=ft.Padding.only(left=10, top=-22, right=2, bottom=2),
+                        hint_style=ft.TextStyle(
+                          color=ft.Colors.SECONDARY,
+                          weight=ft.FontWeight.NORMAL
+                        )
+                      ),
+                      height=25,
+                      expand=True,
+                      border_radius=3,
+                      bgcolor=ft.Colors.SURFACE,
+                      margin=ft.Margin.only(top=5),
+                      clip_behavior=ft.ClipBehavior.HARD_EDGE,
+                      border=ft.Border.all(1, ft.Colors.PRIMARY),
+                      padding=ft.Padding.only(left=0, top=0, right=0, bottom=0)
+                    ),
+                    ft.Text("MB"),
+                  ]
+                ),
+                padding=ft.Padding.only(left=10, top=5, bottom=10, right=10),
                 border=ft.Border.only(top=ft.BorderSide(1,ft.Colors.GREY_800)),
               )
             ],
@@ -265,21 +386,21 @@ async def main(page: ft.Page):
   page.padding = 0
   page.spacing = 0
   fixed_width = 300
-  fixed_height = 210
+  fixed_height = 255
+  page.title = APP_NAME
   page.window.left = 700
-  page.window.opacity = 0.5
-  page.title = "Data Traker"
+  page.window.opacity = OPACITY
   page.window.frameless = False
   page.window.width = fixed_width
   page.window.skip_task_bar = True
   page.window.always_on_top = True
   page.window.height = fixed_height
+  page.window.icon = "favicon.ico" # Windows only
   page.window.min_width = fixed_width
   page.window.max_width = fixed_width
   page.window.title_bar_hidden = True
   page.window.min_height = fixed_height
   page.window.max_height = fixed_height
-  # page.window.icon = "favicon.ico" # Windows only
 
   # Create asyncio task for continuous tracking/updating outzide of rerender loop
   trak = Tracker()
@@ -290,4 +411,4 @@ async def main(page: ft.Page):
   return page.render(lambda: AppView(page, trak))
 
 if __name__ == "__main__":
-  ft.run(main, assets_dir="../assets")
+  ft.run(main, assets_dir="./assets")
