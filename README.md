@@ -1,4 +1,4 @@
-# Data Trakr
+# Data Tracker
 
 A lightweight desktop widget built with [Flet](https://flet.dev/) that displays real-time network data usage. It floats on top of all windows and provides live tracking of data consumption since midnight, including hourly usage graphs and notifications.
 
@@ -26,13 +26,21 @@ A lightweight desktop widget built with [Flet](https://flet.dev/) that displays 
 - Python 3.8+
 - Windows (current release target)
 
-## Installation
+## Running the Application
+
+### For End-Users (Windows)
+
+1. Download the latest `Data Trakcer.exe` from the [Releases](https://github.com/baebranch/data-tracker/releases) page.
+2. Double-click the `.exe` to run. No installation required.
+3. The widget will appear and start tracking your network data usage.
+
+### For Developers
 
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/yourusername/data-trakr.git
-   cd data-trakr
+   git clone https://github.com/yourusername/data-tracker.git
+   cd data-tracker
    ```
 
 2. Create a virtual environment:
@@ -59,7 +67,7 @@ A lightweight desktop widget built with [Flet](https://flet.dev/) that displays 
 Use the VS Code task "Build with Flet" or run:
 
 ```bash
-flet pack main.py --name "Data Trakr" --icon favicon.ico
+flet pack main.py --name "Data Tracker" --icon favicon.ico
 ```
 
 This creates a standalone executable using PyInstaller.
