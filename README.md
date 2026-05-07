@@ -10,6 +10,7 @@ A lightweight desktop widget built with [Flet](https://flet.dev/) that displays 
 - **Notifications**: Alerts when a configurable amount of data (in MB) has been consumed.
 - **Persistent Storage**: Saves usage data across restarts.
 - **Minimal UI**: Compact design with opacity changes on hover.
+- **Taskbar Hidden**: Icon is not shown in the Windows taskbar for a cleaner desktop experience.
 
 ## Screenshots
 

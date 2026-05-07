@@ -2,11 +2,13 @@ import os
 import sys
 import json
 import psutil
+import ctypes
 import asyncio
 import logging
 import pathlib
 import datetime
 import winsound
+import ctypes.wintypes
 import flet as ft
 import flet_charts as fch
 from desktop_notifier import DesktopNotifier, Icon
@@ -16,6 +18,7 @@ logger = logging.getLogger("data_trakr")
 OPACITY = 0.2
 DEFAULT = 100
 DATA_DIR = "data"
+VERSION = "1.1.0"
 APP_NAME = "Data Tracker"
 DATA_FILE = os.path.join(DATA_DIR, "network_data.json")
 
@@ -396,6 +399,33 @@ def AppView(page: ft.Page, trak: Tracker) -> list[ft.Control]:
     )
   ]
 
+async def remove_from_taskbar(title: str) -> None:
+  """Use Win32 API to hide the window from the taskbar."""
+  GWL_EXSTYLE      = -20
+  WS_EX_APPWINDOW  = 0x00040000
+  WS_EX_TOOLWINDOW = 0x00000080
+  SWP_NOMOVE       = 0x0002
+  SWP_NOSIZE       = 0x0001
+  SWP_NOZORDER     = 0x0004
+  SWP_FRAMECHANGED = 0x0020
+  HWND_TOP         = 0
+
+  # Retry briefly to ensure the window handle exists after rendering
+  for _ in range(10):
+    hwnd = ctypes.windll.user32.FindWindowW(None, title)
+    if hwnd:
+      style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+      style = (style | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
+      ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+      # Force Windows to flush the style change to the taskbar
+      ctypes.windll.user32.SetWindowPos(
+        hwnd, HWND_TOP, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED
+      )
+      return
+    await asyncio.sleep(0.1)
+
+
 async def main(page: ft.Page):
   """ Main application Page config and Tracker startup """
   page.padding = 0
@@ -421,6 +451,7 @@ async def main(page: ft.Page):
   trak = Tracker()
   trak.get_midnight_timestamp()
   asyncio.create_task(trak.tracker())
+  asyncio.create_task(remove_from_taskbar(APP_NAME))
 
   # Start rendering Subconscious
   return page.render(lambda: AppView(page, trak))
