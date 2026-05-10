@@ -140,6 +140,7 @@ class Tracker:
         total_sent = 0
         total_recv = 0
         hourly = [0.0] * 24
+        self.last_notified_mb = 0
 
       # Calculate deltas, increment totals and reset last
       delta_sent = counters.bytes_sent - last_sent
