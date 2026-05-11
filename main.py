@@ -31,6 +31,16 @@ else:
 PATH = pathlib.Path(os.path.join(base_path, "assets", "favicon.ico"))
 
 
+def format_data(bytes_value: float) -> str:
+  """Format bytes to MB or GB depending on size."""
+  mb = bytes_value / (1024 * 1024)
+  if mb >= 1024:
+    gb = mb / 1024
+    return f"{gb:.2f} GB"
+  else:
+    return f"{mb:.2f} MB"
+
+
 class Tracker:
   """ Handles the data tracking and storage """
   ready = False # Indicates if Tracker is ready
@@ -170,7 +180,7 @@ class Tracker:
       current_mb = (total_sent + total_recv) / (1024 * 1024)
       if self.threshold > 0 and current_mb >= self.last_notified_mb + self.threshold:
         self.last_notified_mb += self.threshold
-        await self._notifier.send("Data Usage Alert", f"Total data used: {current_mb:.2f} MB")
+        await self._notifier.send("Data Usage Alert", f"Total data used: {format_data(total_sent + total_recv)}")
         winsound.MessageBeep()
       
       self.save_data(total_sent, total_recv, last_sent, last_recv, hourly, self.threshold)
@@ -309,17 +319,19 @@ def AppView(page: ft.Page, trak: Tracker) -> list[ft.Control]:
                   [
                     # Sent
                     ft.Text(
-                      f"Sent\n {sent / (1024*1024):.2f} MB",
+                      max_lines=2,
+                      expand=True,
                       text_align=ft.TextAlign.CENTER,
-                      expand=True
+                      value=f"Sent\n {format_data(sent)}"
                     ),
 
                     # Received with Divider boarder
                     ft.Container(
                       ft.Text(
-                        f"Recv\n {recv / (1024*1024):.2f} MB",
+                        expand=True,
+                        max_lines=2,
                         text_align=ft.TextAlign.CENTER,
-                        expand=True
+                        value=f"Recv\n {format_data(recv)}"
                       ),
                       padding=ft.Padding.symmetric(horizontal=15),
                       border=ft.Border.symmetric(horizontal=ft.BorderSide(1,ft.Colors.GREY_800))
@@ -327,9 +339,10 @@ def AppView(page: ft.Page, trak: Tracker) -> list[ft.Control]:
 
                     # Total
                     ft.Text(
-                      f"Total\n {total / (1024*1024):.2f} MB",
+                      expand=True,
+                      max_lines=2,
                       text_align=ft.TextAlign.CENTER,
-                      expand=True
+                      value=f"Total\n {format_data(total)}"
                     )
                   ],
                   expand=True,
